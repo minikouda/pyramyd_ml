@@ -1,0 +1,36 @@
+name: rag
+channels:
+  - conda-forge
+  - pytorch
+dependencies:
+  # --- Python ---
+  - python=3.10
+
+  # --- Core scientific stack ---
+  - numpy
+  - pandas
+  - matplotlib
+  - scikit-learn
+  - tqdm
+
+  # --- PyTorch ---
+  - pytorch
+  - torchvision
+  - torchaudio
+
+  # --- FAISS ---
+  - faiss-cpu
+
+  # --- Utilities ---
+  - pip
+  - ipython
+  - ipykernel
+
+  # --- Pip-only packages ---
+  - pip:
+      - sentence-transformers
+      - transformers
+      - accelerate
+      - bitsandbytes
+      - gradio
+      - python-dotenv
