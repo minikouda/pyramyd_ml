@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.env
+
+# Data & model artifacts
+data/
+artifacts/
+*.npy
+*.pkl
+*.index
+*.zip
+
+# OS
+.DS_Store
