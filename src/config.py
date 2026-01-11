@@ -1,10 +1,14 @@
 
 import os
 
+# LLM (Using cached 7B model)
 LLM_MODEL = "Qwen/Qwen2.5-7B-Instruct"
-EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
+# Embeddings: BAAI/bge-large-en-v1.5 is SOTA and fits easily on L4
+EMBED_MODEL = "BAAI/bge-large-en-v1.5"
+
 ARTIFACT_DIR = "artifacts"
 
-# Persistent cache directory (creates 'model_cache' in the current persistent repo folder)
+# Persistent cache directory
 MODEL_CACHE_DIR = os.path.join(os.getcwd(), "model_cache")
 os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
