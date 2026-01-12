@@ -1,4 +1,6 @@
-from src.ui import *
+from src.ui import build_app
+
 
 if __name__ == "__main__":
-    print("Run Gradio UI here")
+    demo = build_app()
+    demo.launch()

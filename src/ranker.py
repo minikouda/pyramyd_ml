@@ -1,33 +1,92 @@
+from __future__ import annotations
 
-def hybrid_score(results: list, priorities: dict) -> list:
+import math
+from typing import Any
+
+
+def _min_max_norm(values: list[float]) -> list[float]:
+    if not values:
+        return []
+    vmin = min(values)
+    vmax = max(values)
+    if not math.isfinite(vmin) or not math.isfinite(vmax) or vmax <= vmin:
+        return [0.5 for _ in values]
+    return [(v - vmin) / (vmax - vmin) for v in values]
+
+
+def hybrid_score(
+    results: list[dict[str, Any]],
+    priorities: dict[str, float],
+    *,
+    alpha: float = 0.7,
+) -> list[dict[str, Any]]:
+    """Deterministic hybrid ranking.
+
+    - Uses semantic score from retrieval (`r['score']`).
+    - Uses structured utility from metadata fields (`salary_median`, `rating`, ...).
+    - Produces `r['hybrid_score']` and sorts descending.
+
+    The LLM is NOT used here.
     """
-    Adjusts semantic search scores based on structured priorities.
-    priorities: e.g. {"salary": 0.5, "rating": 0.3}
-    """
-    scored_results = []
+
+    if not results:
+        return []
+
+    alpha = float(max(0.0, min(1.0, alpha)))
+    weights = {k: float(v) for k, v in (priorities or {}).items() if float(v) > 0}
+    w_sum = sum(weights.values())
+
+    # Collect raw features for normalization across the candidate set.
+    sem_raw: list[float] = [float(r.get("score", 0.0)) for r in results]
+    sem_norm = _min_max_norm(sem_raw)
+
+    rating_raw: list[float] = []
+    salary_log_raw: list[float] = []
     for r in results:
-        # Start with semantic score (assumed normalized or cosine sim)
-        final_score = r["score"]
-        meta = r["meta"]
-        
-        # Boost by Rating
-        if "rating" in priorities and meta.get("rating"):
-            # Normalize rating 0-5 -> 0-1 approx
-            norm_rating = meta["rating"] / 5.0
-            final_score += priorities["rating"] * norm_rating
-            
-        # Boost by Salary
-        if "salary" in priorities and meta.get("salary_median"):
-            # Log scale salary to dampen massive outliers
-            # Example assumption: 100k is baseline
-            salary = meta["salary_median"]
-            if salary > 0:
-                import math
-                norm_salary = math.log10(salary) / 6.0 # log10(100k)=5, log10(1m)=6
-                final_score += priorities["salary"] * norm_salary
+        meta = (r.get("meta") or {})
 
-        r["hybrid_score"] = final_score
-        scored_results.append(r)
-        
-    # Sort by new score
-    return sorted(scored_results, key=lambda x: x["hybrid_score"], reverse=True)
+        rating = meta.get("rating")
+        try:
+            rating_raw.append(float(rating))
+        except Exception:
+            rating_raw.append(float("nan"))
+
+        salary = meta.get("salary_median")
+        try:
+            s = float(salary)
+            salary_log_raw.append(math.log10(s) if s > 0 else float("nan"))
+        except Exception:
+            salary_log_raw.append(float("nan"))
+
+    # Replace NaNs with min for stable normalization.
+    def _nan_to_min(xs: list[float]) -> list[float]:
+        finite = [x for x in xs if math.isfinite(x)]
+        if not finite:
+            return [0.0 for _ in xs]
+        mn = min(finite)
+        return [x if math.isfinite(x) else mn for x in xs]
+
+    rating_norm = _min_max_norm(_nan_to_min(rating_raw))
+    salary_norm = _min_max_norm(_nan_to_min(salary_log_raw))
+
+    ranked: list[dict[str, Any]] = []
+    for i, r in enumerate(results):
+        meta = (r.get("meta") or {})
+
+        utility = 0.0
+        if w_sum > 0:
+            if "rating" in weights:
+                utility += weights["rating"] * rating_norm[i]
+            if "salary" in weights:
+                utility += weights["salary"] * salary_norm[i]
+            utility /= w_sum
+
+        hybrid = alpha * sem_norm[i] + (1.0 - alpha) * utility
+
+        out = dict(r)
+        out["meta"] = meta
+        out["hybrid_score"] = float(hybrid)
+        ranked.append(out)
+
+    ranked.sort(key=lambda x: float(x.get("hybrid_score", 0.0)), reverse=True)
+    return ranked

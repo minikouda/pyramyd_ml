@@ -1,47 +1,113 @@
 
-import numpy as np
-from src.embeddings import embed_texts
-from src.config import EMBED_MODEL
+from __future__ import annotations
 
-def search(query: str, index, docs: list, top_k: int = 10, filters: dict = None) -> list:
+from typing import Any
+
+import numpy as np
+
+from src.config import EMBED_MODEL
+from src.embeddings import embed_query
+
+
+def _matches_filters(meta: dict[str, Any], filters: dict[str, Any]) -> bool:
+    if not filters:
+        return True
+
+    for key, val in filters.items():
+        if key == "location":
+            if not isinstance(val, str) or not val.strip():
+                continue
+            target = val.strip().lower()
+            locs = meta.get("locations")
+            if isinstance(locs, list):
+                if not any(str(x).strip().lower() == target for x in locs):
+                    return False
+            elif isinstance(locs, str):
+                if target not in locs.lower():
+                    return False
+            else:
+                return False
+
+        elif key == "min_rating":
+            try:
+                thr = float(val)
+            except Exception:
+                continue
+            rating = meta.get("rating")
+            try:
+                if float(rating) < thr:
+                    return False
+            except Exception:
+                return False
+
+        elif key == "min_salary":
+            try:
+                thr = float(val)
+            except Exception:
+                continue
+            salary = meta.get("salary_median")
+            try:
+                if float(salary) < thr:
+                    return False
+            except Exception:
+                return False
+
+        elif key == "max_salary":
+            try:
+                thr = float(val)
+            except Exception:
+                continue
+            salary = meta.get("salary_median")
+            try:
+                if float(salary) > thr:
+                    return False
+            except Exception:
+                return False
+
+        else:
+            # Exact-match fallback
+            if meta.get(key) != val:
+                return False
+
+    return True
+
+
+def search(
+    query: str,
+    index,
+    docs: list[dict[str, Any]],
+    top_k: int = 10,
+    filters: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     """
     Semantic search with optional metadata filtering.
     """
-    # 1. Embed query
-    # Note: embed_texts returns (N, D), we need (1, D)
-    q_emb = embed_texts([query], EMBED_MODEL, batch_size=1)[0].reshape(1, -1)
+    if top_k <= 0:
+        return []
+
+    # 1) Embed query
+    q_emb = embed_query(query, EMBED_MODEL).astype(np.float32, copy=False)
     
-    # 2. Search FAISS (Fetch 5x top_k to allow for filtering attrition)
-    fetch_k = top_k * 5
+    # 2) Search FAISS (fetch extra to allow for filter attrition)
+    fetch_k = max(int(top_k) * 5, int(top_k))
     scores, indices = index.search(q_emb, fetch_k)
     
-    results = []
+    results: list[dict[str, Any]] = []
     for score, idx in zip(scores[0], indices[0]):
         if idx < 0 or idx >= len(docs): 
             continue
             
         doc = docs[idx]
-        meta = doc.get("meta", {})
-        
-        # 3. Apply Filters
-        if filters:
-            match = True
-            for key, val in filters.items():
-                # Example: filter by "locations" (list check)
-                if key == "location" and isinstance(meta.get("locations"), list):
-                    if val not in meta["locations"]:
-                        match = False; break
-                # Example: filter by "min_rating"
-                elif key == "min_rating":
-                    if meta.get("rating", 0) < val:
-                        match = False; break
-            if not match:
-                continue
+        meta = doc.get("meta", {}) or {}
+
+        # 3) Apply filters
+        if filters and not _matches_filters(meta, filters):
+            continue
         
         results.append({
-            "id": str(idx),
+            "id": str(doc.get("id", idx)),
             "score": float(score),
-            "text": doc["text"],
+            "text": doc.get("text", ""),
             "meta": meta
         })
         

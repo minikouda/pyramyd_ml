@@ -1,32 +1,79 @@
+from __future__ import annotations
 
-import torch
+from functools import lru_cache
+from typing import Optional
+
 import numpy as np
-from sentence_transformers import SentenceTransformer
-try:
-    from src.config import MODEL_CACHE_DIR
-except ImportError:
-    MODEL_CACHE_DIR = None
 
-def embed_texts(texts: list[str], model_name: str, batch_size: int = 64) -> np.ndarray:
+
+def _get_cache_dir() -> Optional[str]:
+    try:
+        from src.config import MODEL_CACHE_DIR
+
+        return MODEL_CACHE_DIR
+    except Exception:
+        return None
+
+
+def _pick_device() -> str:
+    """Pick the best available device for embeddings."""
+
+    try:
+        import torch  # type: ignore
+
+        if torch.cuda.is_available():
+            return "cuda"
+        if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            return "mps"
+    except Exception:
+        pass
+    return "cpu"
+
+
+@lru_cache(maxsize=4)
+def _load_sentence_transformer(model_name: str, device: str):
+    """Load and cache a SentenceTransformer model.
+
+    We cache to avoid re-downloading / reloading the model on every query.
     """
-    Generates embeddings for a list of texts using SentenceTransformers.
-    Auto-detects GPU and normalizes embeddings for cosine similarity.
+
+    try:
+        from sentence_transformers import SentenceTransformer  # type: ignore
+    except Exception as e:  # pragma: no cover
+        raise ModuleNotFoundError(
+            "Missing dependency 'sentence-transformers'. Install it to generate embeddings."
+        ) from e
+
+    cache_dir = _get_cache_dir()
+    return SentenceTransformer(model_name, device=device, cache_folder=cache_dir)
+
+
+def embed_texts(
+    texts: list[str],
+    model_name: str,
+    *,
+    batch_size: int = 64,
+    normalize: bool = True,
+    show_progress_bar: bool = True,
+) -> np.ndarray:
+    """Embed texts as a 2D numpy array (N, D).
+
+    Defaults to normalized embeddings so dot-product == cosine similarity.
     """
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Loading embedding model: {model_name} on {device}...")
-    
-    # Load model (using cache if available)
-    model = SentenceTransformer(model_name, device=device, cache_folder=MODEL_CACHE_DIR)
-    
-    print(f"Embedding {len(texts)} documents (batch_size={batch_size})...")
-    
-    # Encode
-    embeddings = model.encode(
+
+    device = _pick_device()
+    model = _load_sentence_transformer(model_name, device)
+    return model.encode(
         texts,
         batch_size=batch_size,
-        show_progress_bar=True,
-        normalize_embeddings=True, # Vital for dot-product/cosine retrieval
-        convert_to_numpy=True
+        show_progress_bar=show_progress_bar,
+        normalize_embeddings=normalize,
+        convert_to_numpy=True,
     )
-    
-    return embeddings
+
+
+def embed_query(query: str, model_name: str) -> np.ndarray:
+    """Convenience helper: embed a single query into shape (1, D)."""
+
+    v = embed_texts([query], model_name, batch_size=1, show_progress_bar=False)
+    return v.reshape(1, -1)

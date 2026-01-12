@@ -1,41 +1,85 @@
+from __future__ import annotations
 
-from src.llm import generate_response
+from typing import Any
 
-def build_context(results: list) -> str:
-    context_parts = []
-    for i, r in enumerate(results):
-        meta = r["meta"]
-        snippet = f"Document [{i+1}]
-Company: {meta.get('company', 'Unknown')}"
-        if "salary_median" in meta and meta["salary_median"]:
-            snippet += f"
-Median Salary: ${meta['salary_median']:,.0f}"
-        if "rating" in meta:
-            snippet += f"
-Rating: {meta['rating']}/5.0"
-        snippet += f"
-Description: {r['text'][:500]}..." # Truncate to save tokens
-        context_parts.append(snippet)
-    return "
 
-".join(context_parts)
+def build_context(results: list[dict[str, Any]], *, max_chars: int = 700) -> str:
+    """Format retrieval results into numbered context snippets.
 
-def ask_rag(query: str, results: list, model, tokenizer) -> str:
+    The numbering ([1], [2], ...) is what the model should cite in its answer.
+    """
+
+    parts: list[str] = []
+    for i, r in enumerate(results, start=1):
+        meta = r.get("meta", {}) or {}
+        company = meta.get("company", "Unknown")
+        row = meta.get("row_index")
+        rating = meta.get("rating")
+        salary = meta.get("salary_median")
+
+        header = [f"[{i}] company={company}"]
+        if row is not None:
+            header.append(f"row={row}")
+        if rating is not None:
+            header.append(f"rating={rating}")
+        if salary:
+            try:
+                header.append(f"salary_median={float(salary):,.0f}")
+            except Exception:
+                header.append(f"salary_median={salary}")
+
+        text = (r.get("text") or "").strip()
+        if len(text) > max_chars:
+            text = text[:max_chars].rstrip() + " …"
+        parts.append(" | ".join(header) + "\n" + text)
+
+    return "\n\n".join(parts)
+
+
+def ask_rag(
+    query: str,
+    results: list[dict[str, Any]],
+    model,
+    tokenizer,
+    *,
+    max_new_tokens: int = 400,
+    temperature: float = 0.2,
+    top_p: float = 0.9,
+) -> str:
+    """Grounded RAG answer using only retrieved docs.
+
+    `results` should be output of retrieval/ranking (each item has text/meta/score).
+    """
+
     context_str = build_context(results)
-    
-    prompt = f"""You are an expert AI Job Recruiter. Use the retrieved documents below to answer the candidate's query.
-    
-Query: "{query}"
 
-Retrieved Documents:
-{context_str}
+    system = (
+        "You are a careful assistant. Use ONLY the provided context snippets. "
+        "If the context is insufficient, say you don't know. "
+        "Cite sources inline using the bracket numbers like [1], [2]. "
+        "Do NOT invent facts or citations."
+    )
+    user = (
+        f"Query: {query}\n\n"
+        f"Context snippets:\n{context_str}\n\n"
+        "Return:\n"
+        "- A short answer\n"
+        "- Top 3 recommendations (if applicable)\n"
+        "- Bullet reasons with citations"
+    )
 
-Instructions:
-1. Recommend the best options from the documents.
-2. Explicitly cite the Document number [x] for every claim.
-3. If the documents don't help, admit it.
-4. Be concise and professional.
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    # Lazy import so `build_context()` can be used without heavy deps like torch.
+    from src.llm import generate_chat
 
-Answer:"""
-
-    return generate_response(model, tokenizer, prompt)
+    return generate_chat(
+        model,
+        tokenizer,
+        messages,
+        max_new_tokens=max_new_tokens,
+        temperature=temperature,
+        top_p=top_p,
+    )
