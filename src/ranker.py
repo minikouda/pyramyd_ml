@@ -73,6 +73,7 @@ def hybrid_score(
     for i, r in enumerate(results):
         meta = (r.get("meta") or {})
 
+        # Utility in [0,1] computed from normalized structured fields.
         utility = 0.0
         if w_sum > 0:
             if "rating" in weights:
@@ -85,8 +86,36 @@ def hybrid_score(
 
         out = dict(r)
         out["meta"] = meta
+        out["semantic_score_raw"] = float(sem_raw[i])
+        out["semantic_score_norm"] = float(sem_norm[i])
+        out["utility_score"] = float(utility)
+        out["utility_components"] = {
+            "rating_norm": float(rating_norm[i]),
+            "salary_norm": float(salary_norm[i]),
+            "weights": dict(weights),
+        }
         out["hybrid_score"] = float(hybrid)
         ranked.append(out)
 
     ranked.sort(key=lambda x: float(x.get("hybrid_score", 0.0)), reverse=True)
     return ranked
+
+
+def embedding_only_rank(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Baseline: rank purely by embedding similarity score."""
+
+    ranked = [dict(r) for r in (results or [])]
+    ranked.sort(key=lambda x: float(x.get("score", 0.0)), reverse=True)
+    return ranked
+
+
+def structured_only_rank(
+    results: list[dict[str, Any]],
+    priorities: dict[str, float],
+) -> list[dict[str, Any]]:
+    """Baseline: rank purely by structured utility.
+
+    This uses the same normalization as `hybrid_score`, but with alpha=0.
+    """
+
+    return hybrid_score(results, priorities, alpha=0.0)

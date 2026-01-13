@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass
 from typing import Any, Iterable
@@ -18,9 +19,9 @@ class EvalRow:
     query: str
     k: int
     recall_at_k: float
+    latency_ms: float
     mrr_at_k: float = 0.0
     ndcg_at_k: float = 0.0
-    latency_ms: float
 
 
 def mrr_at_k(retrieved_ids: Iterable[str], relevant_ids: set[str] | frozenset[str], k: int) -> float:

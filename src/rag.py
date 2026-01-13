@@ -16,10 +16,28 @@ def build_context(results: list[dict[str, Any]], *, max_chars: int = 700) -> str
         row = meta.get("row_index")
         rating = meta.get("rating")
         salary = meta.get("salary_median")
+        hybrid_score = r.get("hybrid_score")
+        semantic_norm = r.get("semantic_score_norm")
+        utility_score = r.get("utility_score")
 
         header = [f"[{i}] company={company}"]
         if row is not None:
             header.append(f"row={row}")
+        if hybrid_score is not None:
+            try:
+                header.append(f"hybrid_score={float(hybrid_score):.4f}")
+            except Exception:
+                header.append(f"hybrid_score={hybrid_score}")
+        if semantic_norm is not None:
+            try:
+                header.append(f"semantic_norm={float(semantic_norm):.4f}")
+            except Exception:
+                pass
+        if utility_score is not None:
+            try:
+                header.append(f"utility={float(utility_score):.4f}")
+            except Exception:
+                header.append(f"utility={utility_score}")
         if rating is not None:
             header.append(f"rating={rating}")
         if salary:
@@ -57,15 +75,17 @@ def ask_rag(
         "You are a careful assistant. Use ONLY the provided context snippets. "
         "If the context is insufficient, say you don't know. "
         "Cite sources inline using the bracket numbers like [1], [2]. "
-        "Do NOT invent facts or citations."
+        "Do NOT invent facts or citations. "
+        "CRITICAL: The results are already ranked. Do NOT change the ranking or propose a different order."
     )
     user = (
         f"Query: {query}\n\n"
         f"Context snippets:\n{context_str}\n\n"
         "Return:\n"
         "- A short answer\n"
-        "- Top 3 recommendations (if applicable)\n"
-        "- Bullet reasons with citations"
+        "- Top 3 recommendations IN THE GIVEN ORDER (if applicable)\n"
+        "- Bullet reasons with citations\n"
+        "- A brief explanation of why #1 beats #2 beats #3, referencing hybrid_score/utility when present"
     )
 
     messages = [

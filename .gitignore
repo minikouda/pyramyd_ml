@@ -6,7 +6,7 @@ __pycache__/
 
 # Data & model artifacts
 data/
-modle_cache/
+model_cache/
 artifacts/
 *.npy
 *.pkl
