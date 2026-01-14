@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pandas as pd
 from typing import Any
 
 
@@ -95,6 +96,63 @@ def ask_rag(
     # Lazy import so `build_context()` can be used without heavy deps like torch.
     from src.llm import generate_chat
 
+    return generate_chat(
+        model,
+        tokenizer,
+        messages,
+        max_new_tokens=max_new_tokens,
+        temperature=temperature,
+        top_p=top_p,
+    )
+
+
+def build_comparison_table(results: list[dict[str, Any]]) -> pd.DataFrame:
+    """Build a structured DataFrame for side-by-side comparison."""
+    rows = []
+    for r in results:
+        meta = r.get("meta", {}) or {}
+        rows.append({
+            "Company": meta.get("company", "Unknown"),
+            "Rating": meta.get("rating"),
+            "Salary Median": meta.get("salary_median"),
+            "Happiness": meta.get("happiness"),
+            "Locations": str(meta.get("locations", [])),
+            "Hybrid Score": r.get("hybrid_score", 0.0),
+            "Text Snippet": (r.get("text", "") or "")[:150] + "..."
+        })
+    return pd.DataFrame(rows)
+
+
+def compare_companies_llm(
+    query: str,
+    results: list[dict[str, Any]],
+    model,
+    tokenizer,
+    *,
+    max_new_tokens: int = 500,
+    temperature: float = 0.5,
+    top_p: float = 0.9,
+) -> str:
+    """Ask LLM to compare the retrieved companies side-by-side."""
+    context_str = build_context(results, max_chars=1000)
+
+    system = (
+        "You are an expert analyst. Compare the provided companies based on the user's query. "
+        "Use the provided context snippets. Cite sources like [1], [2]. "
+        "Be objective and highlight pros and cons regarding salary, culture, and relevance."
+    )
+    user = (
+        f"Query: {query}\n\n"
+        f"Context snippets:\n{context_str}\n\n"
+        "Please provide a side-by-side comparison summary."
+    )
+
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    
+    from src.llm import generate_chat
     return generate_chat(
         model,
         tokenizer,
