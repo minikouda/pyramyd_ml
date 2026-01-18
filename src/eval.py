@@ -94,6 +94,37 @@ def evaluate_retrieval(
     return rows
 
 
+def evaluate_retrieval_fn(
+    *,
+    search_fn,
+    queries: list[EvalQuery],
+    k: int = 10,
+) -> list[EvalRow]:
+    """Evaluate an arbitrary retrieval function.
+
+    `search_fn` should be a callable: (query: str, top_k: int) -> list[dict]
+    where each dict has an `id`.
+    """
+
+    rows: list[EvalRow] = []
+    for q in queries:
+        start = time.perf_counter()
+        results = search_fn(q.query, top_k=max(k, 1))
+        latency_ms = (time.perf_counter() - start) * 1000.0
+        retrieved_ids = [str(r.get("id", "")) for r in (results or [])]
+        rows.append(
+            EvalRow(
+                query=q.query,
+                k=k,
+                recall_at_k=recall_at_k(retrieved_ids, q.relevant_ids, k=k),
+                mrr_at_k=mrr_at_k(retrieved_ids, q.relevant_ids, k=k),
+                ndcg_at_k=ndcg_at_k(retrieved_ids, q.relevant_ids, k=k),
+                latency_ms=latency_ms,
+            )
+        )
+    return rows
+
+
 def summarize(rows: list[EvalRow]) -> dict[str, float]:
     if not rows:
         return {"avg_recall_at_k": 0.0, "avg_mrr_at_k": 0.0, "avg_ndcg_at_k": 0.0, "avg_latency_ms": 0.0}
