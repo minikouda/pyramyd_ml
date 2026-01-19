@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -133,6 +134,11 @@ def build_app(
     model_state = gr.State(value=None)
     tokenizer_state = gr.State(value=None)
 
+    def _debug_print_exception(context: str, exc: BaseException) -> None:
+        exc_type = type(exc)
+        print(f"[UI ERROR] {context}: {exc_type.__module__}.{exc_type.__name__}: {exc}")
+        print(traceback.format_exc())
+
     def _ensure_artifacts(force_rebuild: bool = False):
         return load_or_build_artifacts(
             csv_path=csv_path,
@@ -141,12 +147,20 @@ def build_app(
         )
 
     def prepare(force_rebuild: bool):
-        arts = _ensure_artifacts(force_rebuild=force_rebuild)
-        return arts, f"Ready: {len(arts.docs)} docs | artifacts in {artifact_dir}"
+        try:
+            arts = _ensure_artifacts(force_rebuild=force_rebuild)
+            return arts, f"Ready: {len(arts.docs)} docs | artifacts in {artifact_dir}"
+        except Exception as e:
+            _debug_print_exception("prepare", e)
+            return None, f"Error ({type(e).__name__}): {e}"
 
     def load_model():
-        model, tokenizer = load_qwen_model(LLM_MODEL)
-        return model, tokenizer, f"Loaded model: {LLM_MODEL}"
+        try:
+            model, tokenizer = load_qwen_model(LLM_MODEL)
+            return model, tokenizer, f"Loaded model: {LLM_MODEL}"
+        except Exception as e:
+            _debug_print_exception("load_model", e)
+            return None, None, f"Error ({type(e).__name__}): {e}"
 
     def run(
         query: str,
@@ -160,49 +174,54 @@ def build_app(
         model,
         tokenizer,
     ):
-        if arts is None:
-            arts = _ensure_artifacts(force_rebuild=False)
+        try:
+            if arts is None:
+                arts = _ensure_artifacts(force_rebuild=False)
 
-        filters: dict[str, Any] = {}
-        if min_rating and min_rating > 0:
-            filters["min_rating"] = float(min_rating)
-        if location and location.strip():
-            filters["location"] = location.strip()
+            filters: dict[str, Any] = {}
+            if min_rating and min_rating > 0:
+                filters["min_rating"] = float(min_rating)
+            if location and location.strip():
+                filters["location"] = location.strip()
 
-        results = search(query, arts.index, arts.docs, top_k=int(top_k), filters=filters or None)
-        priorities = {"salary": float(salary_w), "rating": float(rating_w)}
-        ranked = hybrid_score(results, priorities)
+            results = search(query, arts.index, arts.docs, top_k=int(top_k), filters=filters or None)
+            priorities = {"salary": float(salary_w), "rating": float(rating_w)}
+            ranked = hybrid_score(results, priorities)
 
-        table = []
-        for r in ranked:
-            meta = r.get("meta") or {}
-            table.append(
-                {
-                    "company": meta.get("company", "Unknown"),
-                    "score": round(float(r.get("score", 0.0)), 4),
-                    "hybrid_score": round(float(r.get("hybrid_score", r.get("score", 0.0))), 4),
-                    "rating": meta.get("rating"),
-                    "salary_median": meta.get("salary_median"),
-                    "snippet": (r.get("text") or "")[:200],
-                }
+            table = []
+            for r in ranked:
+                meta = r.get("meta") or {}
+                table.append(
+                    {
+                        "company": meta.get("company", "Unknown"),
+                        "score": round(float(r.get("score", 0.0)), 4),
+                        "hybrid_score": round(float(r.get("hybrid_score", r.get("score", 0.0))), 4),
+                        "rating": meta.get("rating"),
+                        "salary_median": meta.get("salary_median"),
+                        "snippet": (r.get("text") or "")[:200],
+                    }
+                )
+
+            answer = ""
+            if do_rag:
+                if model is None or tokenizer is None:
+                    answer = "LLM not loaded. Click 'Load Qwen model' first."
+                else:
+                    answer = ask_rag(query, ranked[:3], model, tokenizer)
+
+            payload = build_explanation_payload(
+                query=query,
+                results=ranked,
+                priorities=priorities,
+                alpha=0.7,
+                filters=filters or {},
             )
-
-        answer = ""
-        if do_rag:
-            if model is None or tokenizer is None:
-                answer = "LLM not loaded. Click 'Load Qwen model' first."
-            else:
-                answer = ask_rag(query, ranked[:3], model, tokenizer)
-
-        payload = build_explanation_payload(
-            query=query,
-            results=ranked,
-            priorities=priorities,
-            alpha=0.7,
-            filters=filters or {},
-        )
-        explain_json = json.dumps(payload, ensure_ascii=False, indent=2)
-        return table, answer, explain_json, arts
+            explain_json = json.dumps(payload, ensure_ascii=False, indent=2)
+            return table, answer, explain_json, arts
+        except Exception as e:
+            _debug_print_exception("run", e)
+            err = {"error_type": type(e).__name__, "error_message": str(e)}
+            return [], f"Error ({type(e).__name__}): {e}", json.dumps(err, ensure_ascii=False, indent=2), arts
 
     with gr.Blocks() as demo:
         gr.Markdown("# Pyramyd: AI Product Discovery (RAG)")
