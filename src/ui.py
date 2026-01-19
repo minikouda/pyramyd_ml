@@ -291,7 +291,7 @@ def build_app(
             return [], f"Error ({type(e).__name__}): {e}", json.dumps(err, ensure_ascii=False, indent=2), arts
 
     with gr.Blocks() as demo:
-        gr.Markdown("# Pyramyd: AI Product Discovery (RAG)")
+        gr.Markdown("# Pyramyd: AI Product Discovery (RAG) smoke")
 
         with gr.Row():
             prep_btn = gr.Button("Prepare data/index")
@@ -339,5 +339,3 @@ def build_app(
         )
 
     return demo
-
-
