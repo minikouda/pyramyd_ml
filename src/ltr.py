@@ -106,10 +106,7 @@ def featurize_matrix(query: str, results: list[dict[str, Any]], *, feature_names
 
 
 def train_pointwise_reranker(rows: list[TrainRow]) -> TrainedReranker:
-    """Train a simple pointwise reranker.
-
-    Uses scikit-learn LogisticRegression (available in this repo) and keeps the
-    implementation dependency-light. This is a practical LTR baseline.
+    """Train a simple pointwise LogisticRegression reranker model.
     """
 
     if not rows:
@@ -131,6 +128,148 @@ def train_pointwise_reranker(rows: list[TrainRow]) -> TrainedReranker:
 
     model = LogisticRegression(max_iter=2000, class_weight="balanced")
     model.fit(x, y)
+
+    return TrainedReranker(model=model, feature_names=feature_names)
+
+
+def _group_rows_by_query(rows: list[TrainRow]) -> list[tuple[str, list[TrainRow]]]:
+    groups: dict[str, list[TrainRow]] = {}
+    for r in rows:
+        groups.setdefault(str(r.query), []).append(r)
+    # Stable ordering for determinism.
+    return sorted(groups.items(), key=lambda kv: kv[0])
+
+
+def train_lightgbm_ranker(
+    rows: list[TrainRow],
+    *,
+    learning_rate: float = 0.05,
+    n_estimators: int = 200,
+    num_leaves: int = 31,
+    min_child_samples: int = 20,
+    random_state: int = 42,
+) -> TrainedReranker:
+    """Train a LightGBM LambdaRank reranker.
+
+    Requires optional dependency: `lightgbm`.
+
+    Notes:
+    - This trains a *ranking* model over grouped query sessions.
+    - Labels are taken from TrainRow.label (typically weak/binary).
+    """
+
+    if not rows:
+        raise ValueError("No training rows provided")
+
+    try:
+        from lightgbm import LGBMRanker  # type: ignore
+    except Exception as e:  # pragma: no cover
+        raise ModuleNotFoundError(
+            "Missing optional dependency 'lightgbm'. Install it to use train_lightgbm_ranker()."
+        ) from e
+
+    grouped = _group_rows_by_query(rows)
+    if not grouped:
+        raise ValueError("No groups found")
+
+    # Build features and labels in query-group order.
+    feat_dicts: list[dict[str, float]] = []
+    y_list: list[float] = []
+    group_sizes: list[int] = []
+    for _, g in grouped:
+        group_sizes.append(len(g))
+        for row in g:
+            feat_dicts.append(featurize(row.query, row.result))
+            y_list.append(float(row.label))
+
+    feature_names = sorted({k for d in feat_dicts for k in d.keys()})
+    x = np.zeros((len(feat_dicts), len(feature_names)), dtype=np.float32)
+    for i, fd in enumerate(feat_dicts):
+        for j, name in enumerate(feature_names):
+            x[i, j] = float(fd.get(name, 0.0))
+
+    for col in ("salary_log10", "text_len", "token_overlap"):
+        if col in feature_names:
+            j = feature_names.index(col)
+            x[:, j] = np.asarray(_min_max_norm(x[:, j]), dtype=np.float32)
+
+    y = np.asarray(y_list, dtype=np.float32)
+
+    model = LGBMRanker(
+        objective="lambdarank",
+        learning_rate=float(learning_rate),
+        n_estimators=int(n_estimators),
+        num_leaves=int(num_leaves),
+        min_child_samples=int(min_child_samples),
+        random_state=int(random_state),
+    )
+    model.fit(x, y, group=group_sizes)
+
+    return TrainedReranker(model=model, feature_names=feature_names)
+
+
+def train_xgboost_ranker(
+    rows: list[TrainRow],
+    *,
+    learning_rate: float = 0.05,
+    n_estimators: int = 300,
+    max_depth: int = 6,
+    subsample: float = 0.9,
+    colsample_bytree: float = 0.9,
+    random_state: int = 42,
+) -> TrainedReranker:
+    """Train an XGBoost ranking reranker.
+
+    Requires optional dependency: `xgboost`.
+    """
+
+    if not rows:
+        raise ValueError("No training rows provided")
+
+    try:
+        from xgboost import XGBRanker  # type: ignore
+    except Exception as e:  # pragma: no cover
+        raise ModuleNotFoundError(
+            "Missing optional dependency 'xgboost'. Install it to use train_xgboost_ranker()."
+        ) from e
+
+    grouped = _group_rows_by_query(rows)
+    if not grouped:
+        raise ValueError("No groups found")
+
+    feat_dicts: list[dict[str, float]] = []
+    y_list: list[float] = []
+    group_sizes: list[int] = []
+    for _, g in grouped:
+        group_sizes.append(len(g))
+        for row in g:
+            feat_dicts.append(featurize(row.query, row.result))
+            y_list.append(float(row.label))
+
+    feature_names = sorted({k for d in feat_dicts for k in d.keys()})
+    x = np.zeros((len(feat_dicts), len(feature_names)), dtype=np.float32)
+    for i, fd in enumerate(feat_dicts):
+        for j, name in enumerate(feature_names):
+            x[i, j] = float(fd.get(name, 0.0))
+
+    for col in ("salary_log10", "text_len", "token_overlap"):
+        if col in feature_names:
+            j = feature_names.index(col)
+            x[:, j] = np.asarray(_min_max_norm(x[:, j]), dtype=np.float32)
+
+    y = np.asarray(y_list, dtype=np.float32)
+
+    model = XGBRanker(
+        objective="rank:ndcg",
+        learning_rate=float(learning_rate),
+        n_estimators=int(n_estimators),
+        max_depth=int(max_depth),
+        subsample=float(subsample),
+        colsample_bytree=float(colsample_bytree),
+        random_state=int(random_state),
+        tree_method="hist",
+    )
+    model.fit(x, y, group=group_sizes)
 
     return TrainedReranker(model=model, feature_names=feature_names)
 

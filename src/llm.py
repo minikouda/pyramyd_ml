@@ -70,9 +70,11 @@ def load_qwen_model(model_name="Qwen/Qwen2.5-7B-Instruct"):
                 device_map = "auto"
                 torch_dtype = None
             except Exception:
-                print("Quantization unavailable; falling back to float16")
-                device_map = "auto"
-                torch_dtype = torch.float16
+                # On low-VRAM GPUs, float16 often can't fit and `device_map="auto"` may
+                # attempt to offload the entire model to disk (ValueError).
+                print("Quantization unavailable; falling back to CPU (safe mode)")
+                device_map = "cpu"
+                torch_dtype = torch.float32
     elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
         print("Mode: MPS (Apple Silicon)")
         device_map = {"": "mps"}
@@ -92,13 +94,28 @@ def load_qwen_model(model_name="Qwen/Qwen2.5-7B-Instruct"):
         "device_map": device_map,
         "trust_remote_code": True,
         "cache_dir": cache_dir,
+        "low_cpu_mem_usage": True,
     }
     if quantization_config:
         load_kwargs["quantization_config"] = quantization_config
     if torch_dtype:
         load_kwargs["torch_dtype"] = torch_dtype
 
-    model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
+    try:
+        model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
+    except ValueError as e:
+        # Some accelerate configurations can decide to offload the *entire* model to disk,
+        # which raises: "You are trying to offload the whole model to the disk...".
+        # Fall back to a conservative CPU load rather than requiring disk_offload.
+        msg = str(e)
+        if "offload the whole model to the disk" in msg:
+            print("Detected full disk offload attempt; retrying on CPU (safe mode)")
+            load_kwargs["device_map"] = "cpu"
+            load_kwargs.pop("quantization_config", None)
+            load_kwargs["torch_dtype"] = torch.float32
+            model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
+        else:
+            raise
     return model, tokenizer
 
 def generate_response(
