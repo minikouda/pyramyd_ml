@@ -29,11 +29,12 @@ Disclaimer: see [DISCLAIMER.md](DISCLAIMER.md)
 1.  **Retrieve candidates** via dense embeddings (FAISS) and optional sparse retrieval (BM25).
 2.  **Fuse and/or rerank** candidates deterministically (e.g., RRF fusion; hybrid scoring).
 3.  **Apply preferences** via a structured utility model controlled by weights and $\alpha$.
-4.  **Generate an explanation** using an LLM constrained to cite evidence and not reorder items.
+4.  **Generate explanations and side-by-side comparisons** using an LLM constrained to cite evidence.
 5.  **Evaluate** retrieval/ranking and run lightweight grounding checks.
 
-The core scoring idea is: $$
-    ext{score}(i) = \alpha\,\text{semantic}(i) + (1-\alpha)\,\text{utility}(i; \mathbf{w})
+The core scoring idea is: 
+$$
+    \text{score}(i) = \alpha\,\text{semantic}(i) + (1-\alpha)\,\text{utility}(i; \mathbf{w})
 $$
 
 ------------------------------------------------------------------------
