@@ -1,200 +1,77 @@
-# AI Product Discovery with RAG
+# Pyramyd: Decision‑Focused RAG for Product/Company Discovery
 
-**Semantic Retrieval · Hybrid Ranking · Preference-Aware Explanations**
+**Semantic retrieval · deterministic hybrid ranking · grounded explanations**
 
-## 🔗 **Disclaimer**: See [DISCLAIMER.md](DISCLAIMER.md)
-
-## Overview
-
-This project implements a **decision-focused Retrieval-Augmented Generation (RAG) system** for company discovery and comparison.\
-Unlike generic “chat over a CSV” demos, the system treats discovery as a **retrieval + ranking + explanation** problem under **user constraints and preferences**, and uses an LLM **only to explain and justify results**, not to rank them.
-
-The system produces: - **Top-K ranked results (e.g., Top 5)** using deterministic scoring - **LLM-generated explanations** for *why each result matches* and *why the ordering makes sense* - **Grounded comparisons** with citations to retrieved evidence
-
-This design emphasizes **stability, interpretability, and evaluability**.
+Disclaimer: see [DISCLAIMER.md](DISCLAIMER.md)
 
 ------------------------------------------------------------------------
 
 ## Demo
 
-### Search Interface
-
 ![Search interface](demo/interface.png)
 
-### Example Result: “data science” query
-
 ![Results for the data science query](demo/data_science.png)
-
-### Full Interaction (GIF)
 
 ![End-to-end demo](demo/demo.gif)
 
 ------------------------------------------------------------------------
 
-## Key Design Principle
+## What It Does
 
-> **The LLM explains the ranking — it does not decide it.**
+**Input** - A natural-language query (e.g., “high-paying entry-level roles with strong work-life balance”) - Optional hard constraints (location, salary bounds, remote eligibility) - Optional preference weights (salary vs culture vs growth)
 
-Ranking is performed by a hybrid scoring function.\
-The LLM is used *afterward* to generate transparent, evidence-backed reasoning.
-
-------------------------------------------------------------------------
-
-## What the System Does
-
-### Input
-
--   Natural-language query\
-    *e.g., “High-paying entry-level roles with strong work-life balance”*
--   Optional hard constraints\
-    *(location, salary bounds, remote eligibility)*
--   Optional preference weights\
-    *(salary vs culture vs growth)*
-
-### Output
-
--   **Top 3 ranked companies/roles**
--   **Per-item justification** (“why this matches”)
--   **Global ranking explanation** (“why #1 beats #2”)
--   **Evidence citations** to reviews / structured fields
+**Output** - A ranked Top‑K list (commonly Top 3) - Per‑item “why it matches” rationale - Global “why this ordering” rationale - Evidence citations (e.g., `[1]`, `[2]`) tied to retrieved snippets - Side-by-side comparison view
 
 ------------------------------------------------------------------------
 
-## Architecture Overview
+## How It Works (High Level)
 
-User Query ↓ Dense Retrieval (Embeddings) ↓ Candidate Pool (Top N) ↓ Constraint Filtering ↓ Hybrid Ranking (Semantic + Utility) ↓ Top 3 Results (Deterministic) ↓ LLM Explanation (Grounded, Non-Reordering) ↓ User-Facing Output
+1.  **Retrieve candidates** via dense embeddings (FAISS) and optional sparse retrieval (BM25).
+2.  **Fuse and/or rerank** candidates deterministically (e.g., RRF fusion; hybrid scoring).
+3.  **Apply preferences** via a structured utility model controlled by weights and $\alpha$.
+4.  **Generate an explanation** using an LLM constrained to cite evidence and not reorder items.
+5.  **Evaluate** retrieval/ranking and run lightweight grounding checks.
 
-------------------------------------------------------------------------
-
-## Core Components
-
-### 1. Semantic Retrieval
-
--   Embeddings: `BAAI/bge-large-en-v1.5`
--   LLM_MODEL: `Qwen/Qwen2.5-7B-Instruct`
--   Chunked review text and descriptions
--   FAISS vector index
--   Query → top-N semantic candidates
-
-### 2. Hybrid Ranking (Deterministic)
-
-Each candidate receives:
-
-final_score = alpha · semantic_similarity + (1 − alpha) · utility(structured_features, user_weights)
-
-Where: - `semantic_similarity` = embedding similarity - `utility` = normalized structured features (salary, rating, interview difficulty, etc.) - `alpha` controls semantic vs structured importance
-
-The **Top 3** are selected *before* invoking the LLM.
+The core scoring idea is: $$
+    ext{score}(i) = \alpha\,\text{semantic}(i) + (1-\alpha)\,\text{utility}(i; \mathbf{w})
+$$
 
 ------------------------------------------------------------------------
 
-### 3. Preference-Aware Utility Modeling
+## What’s Implemented
 
-Structured attributes are normalized and combined using user-defined weights:
-
-utility(i) = sum_k w_k · f_k(i)
-
-This reframes discovery as a **multi-criteria decision problem**, not just NLP.
-
-------------------------------------------------------------------------
-
-### 4. Grounded LLM Explanations (Post-Ranking)
-
-For the Top 3 results, the LLM: - **Explains why each result matches the query** - **Explains why the ordering makes sense** - Uses: - score breakdowns - structured fields - retrieved evidence snippets - Is explicitly instructed **not to reorder or invent facts**
-
-#### Example Output
-
-1.  **Company A** (Score 0.82)
-    -   Why: Strong semantic match to “growth + work-life balance,” competitive salary, and multiple reviews citing flexible schedules \[A1\]\[A3\].
-2.  **Company B** (Score 0.79)
-    -   Why: Similar role alignment, but lower salary and mixed WLB evidence \[B2\].
-
-**Why this ordering:**\
-Company A outranks Company B due to stronger structured alignment (salary + rating), despite similar semantic relevance.
+-   **Dense retrieval** with SentenceTransformers embeddings + FAISS index
+-   **Sparse retrieval** with BM25 (dependency‑light)
+-   **Hybrid retrieval** with RRF fusion (dense + sparse)
+-   **Deterministic ranking** that combines semantic match + structured utility features
+-   **Optional learning-to-rank** baseline reranker (LogisticRegression; optional LightGBM/XGBoost hooks)
+-   **Grounding checks** (citation coverage + simple claim–evidence overlap heuristics)
+-   **Tests + CI** via `pytest` and GitHub Actions
 
 ------------------------------------------------------------------------
 
-### 5. Evaluation
-
--   Retrieval: Recall\@K, MRR, nDCG\@K
--   Ranking quality under constraints
--   Optional grounding checks:
-    -   citation coverage
-    -   claim–evidence overlap
-
-------------------------------------------------------------------------
-
-## Repository Structure
+## Repo At A Glance
 
 ``` text
 .
-├── artifacts/        # FAISS index, embeddings, experiment outputs (gitignored)
-├── data/             # Raw CSV data (gitignored)
-├── notebooks/        # EDA, indexing, experiments
-├── scripts/          # Entry points (UI, evaluation)
-├── src/
-│   ├── data.py       # Data loading / cleaning
-│   ├── embeddings.py # Embedding generation
-│   ├── index.py      # FAISS index
-│   ├── retrieval.py  # Candidate retrieval
-│   ├── ranker.py     # Hybrid + preference-aware ranking
-│   ├── rag.py        # Evidence assembly
-│   ├── llm.py        # Explanation generation
-│   ├── eval.py       # Metrics and reporting
-│   └── ui.py         # User interface
-├── scripts/run_ui.py
-├── environment.yml
-└── requirements.txt
+├── src/                  # core pipeline (retrieval, ranking, rag, eval)
+├── notebooks/            # end-to-end notebook demo
+├── data/                 # raw datasets (gitignored)
+├── artifacts/            # embeddings/index/outputs (gitignored)
+├── requirements.txt
+└── environment.yml
 ```
-
-**LLM Explanation Prompt (Conceptual)**
-
-The LLM receives: Query, constraints, preference weights (optional and can be natural language)
-
-**Return:** Top 3 results (already ranked) Score breakdowns Evidence snippets with IDs
-
-Instructions: Do not change the ranking Cite evidence for each claim Explain both per-item relevance and global ordering
-
-**TODO: Roadmap (Making It Outstanding)** Tier 2 — Research-Oriented Extensions Preference-conditioned embeddings
-
-Counterfactual preference stability analysis
-
-Sensitivity analysis over alpha and weights
-
-Tier 3 — Engineering & Polish Config-driven experiments (YAML)
-
-Automated experiment logging
-
-Unit tests + CI
-
-UI score breakdowns (“Why this result?”)
-
-Side-by-side comparison view
-
-Resume Positioning (Example) Designed a preference-aware retrieval and ranking system for company discovery using dense embeddings and structured signals.
-
-Implemented deterministic hybrid ranking with LLM-generated, evidence-backed explanations for top-K results.
-
-Built an evaluation suite (Recall\@K, nDCG\@K) demonstrating improvements over embedding-only baselines.
 
 ------------------------------------------------------------------------
 
-## Quickstart (Local)
+## Getting Started (Minimal)
 
-Install deps:
+**Run the notebook** - Open [notebooks/AI_Product_Discovery_RAG_Structure.ipynb](notebooks/AI_Product_Discovery_RAG_Structure.ipynb) and run top‑to‑bottom.(Make sure you have the required data/artifacts.)
 
-``` bash
-pip install -r requirements.txt
-```
-
-Run the Gradio UI:
+**Run tests**
 
 ``` bash
-python scripts/run_ui.py
+pytest
 ```
 
-Artifacts are created under `artifacts/` on first run: - `docs.json` - `embeddings.npy` - `faiss.index`
-
-## Quickstart (Notebook)
-
-Run the notebook end-to-end in order: - Build docs - Generate embeddings - Build FAISS index - Retrieve + (optional) deterministic re-ranking - (optional) grounded RAG answer generation
+Notes: - `data/` and `artifacts/` are intentionally gitignored. - Cache/output directories can be overridden via env vars (see `src/config.py`).

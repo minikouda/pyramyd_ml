@@ -10,3 +10,4 @@ accelerate
 bitsandbytes
 gradio
 torch
+pytest

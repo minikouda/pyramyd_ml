@@ -34,3 +34,4 @@ dependencies:
       - bitsandbytes
       - gradio
       - python-dotenv
+      - pytest
