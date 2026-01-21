@@ -20,7 +20,7 @@ Disclaimer: see [DISCLAIMER.md](DISCLAIMER.md)
 
 **Input** - A natural-language query (e.g., “high-paying entry-level roles with strong work-life balance”) - Optional hard constraints (location, salary bounds, remote eligibility) - Optional preference weights (salary vs culture vs growth)
 
-**Output** - A ranked Top‑K list (commonly Top 3) - Per‑item “why it matches” rationale - Global “why this ordering” rationale - Evidence citations (e.g., `[1]`, `[2]`) tied to retrieved snippets - Side-by-side comparison view
+**Output** - A ranked Top‑K list (commonly Top 3) - Per‑item “why it matches” rationale - Global “why this ordering” rationale - Evidence citations (pros and keywords) tied to retrieved snippets - Side-by-side comparison view
 
 ------------------------------------------------------------------------
 
