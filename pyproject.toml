@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+# Keep warnings visible in CI but not overly noisy.
+filterwarnings = [
+  "error::DeprecationWarning:src.*",
+]
